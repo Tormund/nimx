@@ -7,11 +7,13 @@ type AnimationRunner* = ref object
     onAnimationAdded*: proc()
     onAnimationRemoved*: proc()
     paused: bool
+    mPrevTick: float
 
 proc newAnimationRunner*(): AnimationRunner=
     result = new(AnimationRunner)
     result.animations = @[]
     result.paused = false
+    result.mPrevTick = epochTime()
 
 proc pushAnimation*(ar: AnimationRunner, a: Animation) =
     if a.isNil:
@@ -65,10 +67,14 @@ proc update*(ar: AnimationRunner)=
     var index = 0
     let animLen = ar.animations.len
 
+    let ct = epochTime()
+    let dt = ct - ar.mPrevTick
+    ar.mPrevTick = ct
+
     while index < min(animLen, ar.animations.len):
         var anim = ar.animations[index]
         if not anim.finished:
-            anim.tick(epochTime())
+            anim.tick(dt)
         inc index
 
     index = 0

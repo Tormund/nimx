@@ -29,8 +29,10 @@ type ProgressHandler = object
 
 type
     Animation* = ref object of RootObj
+        timeScale*: float
         startTime*: float
         pauseTime*: float
+        duration: float
         loopDuration*: float
         loopPattern*: LoopPattern
         cancelBehavior*: CancelBehavior
@@ -56,6 +58,7 @@ type
     CompositAnimation* = ref object of Animation
         mMarkers: seq[ComposeMarker]
         mPrevDirection: bool
+        mDt: float
 
     MetaAnimation* = ref object of Animation
         animations*: seq[Animation]
@@ -68,6 +71,7 @@ proc init*(a: Animation) =
     a.loopDuration = 1.0
     a.cancelBehavior = cbNoJump
     a.loopPattern = lpStartToEnd
+    a.timeScale = 1.0
 
 proc newAnimation*(): Animation =
     result.new()
@@ -111,6 +115,7 @@ method prepare*(a: Animation, st: float) {.base.} =
     a.tphIt = 0
     a.cancelLoop = -1
     a.curLoop = 0
+    a.duration = 0.0
 
 template currentLoopForTotalDuration(a: Animation, d: float): int = int(d / a.loopDuration)
 
@@ -147,18 +152,20 @@ method onProgress*(a: Animation, p: float) {.base.} =
     if not a.onAnimate.isNil:
         a.onAnimate(a.curvedProgress(p))
 
-proc loopProgress(a: Animation, t: float): float=
-    var duration = t - a.startTime
-    if duration < MIN_LOOP_DURATION:
-        error("Invalid duration - ", duration, " set to min value ",  MIN_LOOP_DURATION)
-        duration = MIN_LOOP_DURATION
+proc loopProgress(a: Animation, dt: float): float=
+    a.duration += dt * a.timeScale
+    # var duration = t - a.startTime
+    if a.duration < MIN_LOOP_DURATION:
+        error("Invalid duration - ", a.duration, " set to min value ",  MIN_LOOP_DURATION)
+        a.duration = MIN_LOOP_DURATION
 
-    a.curLoop = a.currentLoopForTotalDuration(duration)
-    result = (duration mod a.loopDuration) / a.loopDuration
+    a.curLoop = a.currentLoopForTotalDuration(a.duration)
+    result = (a.duration mod a.loopDuration) / a.loopDuration
+    # a.duration = duration
 
-proc totalProgress(a: Animation, t: float): float=
+proc totalProgress(a: Animation, t: float): float= #todo: cleanup signature
     result =
-        if a.numberOfLoops > 0: (t - a.startTime) / (float(a.numberOfLoops) * a.loopDuration)
+        if a.numberOfLoops > 0: a.duration / (float(a.numberOfLoops) * a.loopDuration)
         else: 0.0
 
 method checkHandlers(a: Animation, oldLoop: int, lp, tp: float) {.base.} =
@@ -193,12 +200,12 @@ proc loopFinishCheck(a: Animation, lp, tp: var float)=
         lp = 1.0
         tp = 1.0
 
-method tick*(a: Animation, t: float) {.base.} =
+method tick*(a: Animation, dt: float) {.base.} =
     if a.pauseTime != 0: return
 
     let oldLoop = a.curLoop
-    var loopProgress = a.loopProgress(t)
-    var totalProgress = a.totalProgress(t)
+    var loopProgress = a.loopProgress(dt)
+    var totalProgress = a.totalProgress(dt)
 
     a.loopFinishCheck(loopProgress, totalProgress)
 
@@ -324,6 +331,7 @@ proc addComposeMarker(m: CompositAnimation, marker: ComposeMarker) =
             a.startTime = 0.0
             a.finished = false
             a.curLoop = 0
+            a.duration = 0.0
 
     m.mMarkers.add(marker)
 
@@ -334,6 +342,7 @@ proc newCompositAnimation*(duration: float, markers: varargs[ComposeMarker]): Co
     m.loopPattern = lpStartToEnd
     m.loopDuration = duration
     m.mMarkers = @[]
+    m.timeScale = 1.0
 
     for marker in markers:
         m.addComposeMarker(marker)
@@ -402,13 +411,19 @@ method prepare*(m: CompositAnimation, t: float)=
     m.cancelLoop = -1
     m.curLoop = 0
     m.mPrevDirection = m.isDirectionForward(0.0)
+    m.duration = 0.0
 
     for marker in m.markersAtProgress(0.0, false): discard
 
     for cm in m.mMarkers:
         cm.animation.startTime = 0.0
         cm.animation.cancelLoop = -1
+        cm.animation.duration = 0.0
         cm.isActive = false
+
+method tick*(m: CompositAnimation, dt: float) =
+    procCall m.Animation.tick(dt)
+    m.mDt = dt
 
 method onProgress*(m: CompositAnimation, p: float) =
     let cp = m.curvedProgress(p)
@@ -432,13 +447,15 @@ method onProgress*(m: CompositAnimation, p: float) =
             elif directionChangedL:
                 acp = 0.0
 
-            var sc = m.loopDuration / (a.loopDuration * a.numberOfLoops.float)
-            var ap = acp * a.numberOfLoops.float * sc
-            let t = a.startTime + a.loopDuration * ap
+            # var sc = m.loopDuration / (a.loopDuration * a.numberOfLoops.float)
+            # var ap = acp * a.numberOfLoops.float * sc
+            # let t = a.startTime + a.loopDuration * ap
+
+            a.duration += m.mDt
 
             let oldLoop = a.curLoop
-            var loopProgress = a.loopProgress(t)
-            var totalProgress = a.totalProgress(t)
+            var loopProgress = a.loopProgress(a.duration)
+            var totalProgress = a.totalProgress(a.duration)
             a.loopFinishCheck(loopProgress, totalProgress)
 
             a.onProgress(loopProgress)
@@ -462,6 +479,7 @@ proc newMetaAnimation*(anims: varargs[Animation]): MetaAnimation {.deprecated.} 
     result.animations = @anims
     result.curIndex = -1
     result.loopDuration = 1.0
+    result.timeScale = 1.0
 
 proc nextIndex(a: MetaAnimation) =
     if a.loopPattern == lpStartToEnd:
@@ -513,6 +531,7 @@ method prepare*(a: MetaAnimation, t: float)=
     a.cancelLoop = -1
     a.curLoop = 0
     a.curIndex = -1
+    a.duration = 0.0
 
 method tick*(a: MetaAnimation, t: float) =
 

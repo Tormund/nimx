@@ -6,6 +6,8 @@ import nimx.animation
 import nimx.window
 import nimx.button
 import nimx.progress_indicator
+import nimx.slider
+import nimx.text_field
 import sample_registry
 
 type AnimationSampleView = ref object of View
@@ -34,6 +36,22 @@ method init*(v: AnimationSampleView, r: Rect) =
     v.animation.onComplete do():
         startStopButton.title = "Start"
     #v.animation.numberOfLoops = 2
+
+    let scaleLbl = newLabel(newRect(20, 570, 100, 16))
+    scaleLbl.text = $0.5
+    v.addSubview(scaleLbl)
+
+    let slider = Slider.new(newRect(120, 570, v.bounds.width - 130, 16))
+    slider.autoresizingMask = { afFlexibleWidth, afFlexibleMaxY }
+    slider.value = 0.5
+    slider.onAction do():
+        var val = slider.value * 2.0
+        scaleLbl.text = ($val)[0 .. (if val > 0.0: 5 else: 6)]
+        echo "val ", val
+        v.animation.timeScale = val
+        # textField.text = "Slider value: " & $slider.value & " "
+        # progress.value = slider.value
+    v.addSubview(slider)
 
     let playPauseButton = newButton(newRect(80, 20, 70, 50))
     playPauseButton.title = "Pause"
